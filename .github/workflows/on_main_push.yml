@@ -1,0 +1,19 @@
+name: Build & Deploy
+
+on:
+  # We do not use a .lock file, as rust-wolfssl is a library. Therefore, build could potentially fail if new updates
+  # to dependencies are pushed. By building rust-wolfssl scheduled we get to know that.
+  schedule:
+    - cron:  '0 3 * * 5' # Run "At 03:00 on Friday"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-check:
+    uses: ./.github/workflows/run-checks.yml
+  run-tests:
+    uses: ./.github/workflows/run-tests.yml
+  build:
+    uses: ./.github/workflows/run-build.yml

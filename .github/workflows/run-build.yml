@@ -1,0 +1,16 @@
+name: Run build
+
+on:
+  workflow_call:
+
+jobs:
+  run-tests:
+    name: Build
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v1
+      - name: Test
+        shell: bash
+        run: |
+          cargo build

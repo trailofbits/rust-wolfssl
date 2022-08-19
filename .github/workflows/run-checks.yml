@@ -1,0 +1,15 @@
+name: Run checks
+
+on:
+  workflow_call:
+
+jobs:
+  run-checks:
+    name: Check
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v1
+      - name: Format
+        shell: bash
+        run: cargo fmt
