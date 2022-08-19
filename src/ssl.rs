@@ -17,6 +17,7 @@ use libc::{c_int, c_uchar, c_uint, c_void};
 use log::LevelFilter;
 use wolfssl_sys as wolf;
 
+use crate::x509::X509Ref;
 use crate::{
     bio,
     callbacks::{ctx_msg_callback, ssl_msg_callback, ExtraUserDataRegistry, UserData},
@@ -24,7 +25,6 @@ use crate::{
     util::{cvt, cvt_n, cvt_p},
     TLSVersion,
 };
-use crate::x509::X509Ref;
 
 const EXTRA_USER_DATA_REGISTRY_INDEX: i32 = 0;
 
@@ -622,9 +622,7 @@ impl<S: Read + Write> SslStream<S> {
     /// It is inadvisable to read from or write to the underlying stream as it
     /// will most likely corrupt the SSL session.
     pub fn get_mut(&mut self) -> &mut S {
-        unsafe {
-            bio::get_mut(self.bio)
-        }
+        unsafe { bio::get_mut(self.bio) }
     }
 
     /// Returns a longer string describing the state of the session.
@@ -762,7 +760,7 @@ impl<S: Read + Write> SslStream<S> {
             let side = wolf::wolfSSL_GetSide(self.ssl.as_ptr());
 
             if side < 0 {
-                return Err(self.make_error(side))
+                return Err(self.make_error(side));
             }
 
             if side as c_uint == wolf::WOLFSSL_CLIENT_END {

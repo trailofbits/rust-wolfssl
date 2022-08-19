@@ -16,12 +16,11 @@ pub enum TLSVersion {
     V1_2,
 }
 
-
 #[cfg(test)]
 mod tests {
+    use crate::ssl::{Ssl, SslContext, SslMethod, SslStream, SslVerifyMode};
     use std::io::{Read, Write};
     use std::net::TcpStream;
-    use crate::ssl::{Ssl, SslContext, SslMethod, SslStream, SslVerifyMode};
 
     #[test]
     fn test() {
@@ -30,7 +29,6 @@ mod tests {
         client_ctx.set_verify(SslVerifyMode::NONE);
 
         let client = Ssl::new(&client_ctx).unwrap();
-
 
         println!("Starting");
 
@@ -47,6 +45,5 @@ mod tests {
         client_stream.read(&mut out).unwrap();
 
         println!("{}", std::str::from_utf8(&out).unwrap());
-
     }
 }
