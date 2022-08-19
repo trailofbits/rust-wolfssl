@@ -4,11 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = [ "pkey",  "msg-callback", "error-library", ]
 
-wolfssl430 = []
+full = ["rsa","num-tickets", "use-session-ticket"]
+
+# Enable support for wolfSSL 430
+wolfssl430  = []
+
+pkey = []
+rsa = []
+msg-callback = []
+num-tickets = []
+error-library = []
+use-session-ticket = []
+
+# Enable internal inspection of wolfSSL.  Needs a patched wolfssl-sys.
+internal-header = []
 
 [dependencies]
-wolfssl-sys = "0.1.7"
+wolfssl-sys = { path = "./wolfssl-sys"}
 
 libc = { version = "0.2.126" }
 foreign-types = { version = "0.5.0" }
@@ -19,3 +33,10 @@ log = "0.4.17"
 [dev-dependencies]
 
 [build-dependencies]
+
+
+[workspace]
+
+members = [
+"wolfssl-sys"
+]
