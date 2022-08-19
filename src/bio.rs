@@ -163,7 +163,7 @@ unsafe extern "C" fn ctrl<S: Write>(
 ) -> c_long {
     let state = state::<S>(bio);
 
-    if cmd == wolfssl_sys::BIO_CTRL_FLUSH as c_int {
+    if cmd == wolf::BIO_CTRL_FLUSH as c_int {
         match catch_unwind(AssertUnwindSafe(|| state.stream.flush())) {
             Ok(Ok(())) => 1,
             Ok(Err(err)) => {
@@ -175,7 +175,7 @@ unsafe extern "C" fn ctrl<S: Write>(
                 0
             }
         }
-    } else if cmd == wolfssl_sys::BIO_CTRL_DGRAM_QUERY_MTU as c_int {
+    } else if cmd == wolf::BIO_CTRL_DGRAM_QUERY_MTU as c_int {
         state.dtls_mtu_size
     } else {
         0
@@ -183,7 +183,7 @@ unsafe extern "C" fn ctrl<S: Write>(
 }
 
 unsafe extern "C" fn create(bio: *mut wolf::WOLFSSL_BIO) -> c_int {
-    wolf::wolfSSL_BIO_set_init(bio, 0);
+    // Not supported by wolfSSL. Is this really needed? wolf::wolfSSL_BIO_set_init(bio, 0);
     BIO_set_num(bio, 0);
     wolf::wolfSSL_BIO_set_data(bio, ptr::null_mut());
     wolf::wolfSSL_BIO_set_flags(bio, 0);
@@ -199,7 +199,7 @@ unsafe extern "C" fn destroy<S>(bio: *mut wolf::WOLFSSL_BIO) -> c_int {
     assert!(!data.is_null());
     drop(Box::<StreamState<S>>::from_raw(data as *mut _));
     wolf::wolfSSL_BIO_set_data(bio, ptr::null_mut());
-    wolf::wolfSSL_BIO_set_init(bio, 0);
+    // Not supported by wolfSSL. Is this really needed? wolf::wolfSSL_BIO_set_init(bio, 0);
     1
 }
 
@@ -218,7 +218,7 @@ pub fn bio_new<S: Read + Write>(
     unsafe {
         let bio = cvt_p(wolf::wolfSSL_BIO_new(method.0.get()))?;
         wolf::wolfSSL_BIO_set_data(bio, Box::into_raw(state) as *mut _);
-        wolf::wolfSSL_BIO_set_init(bio, 1);
+        // Not supported by wolfSSL. Is this really needed? wolf::wolfSSL_BIO_set_init(bio, 1);
 
         Ok((bio, method))
     }
@@ -316,7 +316,7 @@ impl BIO_METHOD {
         }
     }
 
-    fn get(&self) -> *mut wolf::BIO_METHOD {
+    fn get(&self) -> *mut wolf::WOLFSSL_BIO_METHOD {
         self.0
     }
 }

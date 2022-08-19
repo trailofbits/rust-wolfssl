@@ -5,7 +5,6 @@ use wolfssl_sys as wolf;
 
 use crate::{
     error::ErrorStack,
-    rsa::Rsa,
     util::{cvt, cvt_p},
 };
 
@@ -35,13 +34,14 @@ foreign_type! {
     }
 }
 
+#[cfg(feature = "rsa")]
 impl PKey<Private> {
     /// Creates a new `PKey` containing an RSA key.
     ///
     /// This corresponds to [`EVP_PKEY_assign_RSA`].
     ///
     /// [`EVP_PKEY_assign_RSA`]: https://www.openssl.org/docs/man1.1.0/crypto/EVP_PKEY_assign_RSA.html
-    pub fn from_rsa(rsa: Rsa<Private>) -> Result<PKey<Private>, ErrorStack> {
+    pub fn from_rsa(rsa: rsa::Rsa<Private>) -> Result<PKey<Private>, ErrorStack> {
         unsafe {
             let evp = cvt_p(wolf::wolfSSL_EVP_PKEY_new())?;
             let pkey = PKey::from_ptr(evp);

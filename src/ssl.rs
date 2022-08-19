@@ -13,7 +13,7 @@ use std::{
 
 use bitflags::bitflags;
 use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
-use libc::{c_int, c_uchar, c_void};
+use libc::{c_int, c_uchar, c_uint, c_void};
 use log::LevelFilter;
 use wolfssl_sys as wolf;
 
@@ -22,9 +22,9 @@ use crate::{
     callbacks::{ctx_msg_callback, ssl_msg_callback, ExtraUserDataRegistry, UserData},
     error::{ErrorCode, ErrorStack, InnerError, SslError},
     util::{cvt, cvt_n, cvt_p},
-    x509::X509Ref,
     TLSVersion,
 };
+use crate::x509::X509Ref;
 
 const EXTRA_USER_DATA_REGISTRY_INDEX: i32 = 0;
 
@@ -204,7 +204,7 @@ impl SslContextRef {
         registry.set(value);
     }
 
-    #[cfg(not(feature = "wolfssl430"))]
+    #[cfg(feature = "msg-callback")]
     pub fn set_msg_callback<F>(&mut self, callback: F) -> Result<(), ErrorStack>
     where
         F: Fn(&mut SslRef, i32, u8, bool) + 'static,
@@ -249,7 +249,7 @@ impl SslContextRef {
     /// This corresponds to [`SSL_CTX_use_PrivateKey`].
     ///
     /// [`SSL_CTX_use_PrivateKey`]: https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_use_PrivateKey_file.html
-    #[cfg(not(feature = "wolfssl430"))]
+    #[cfg(feature = "pkey")]
     pub fn set_private_key<T>(&mut self, key: &crate::pkey::PKeyRef<T>) -> Result<(), ErrorStack>
     where
         T: crate::pkey::HasPrivate,
@@ -263,7 +263,6 @@ impl SslContextRef {
         }
     }
 
-    #[cfg(feature = "wolfssl430")]
     pub fn set_private_key_pem(&mut self, key: &[u8]) -> Result<(), ErrorStack> {
         unsafe {
             cvt(wolf::wolfSSL_CTX_use_PrivateKey_buffer(
@@ -287,7 +286,7 @@ impl SslContextRef {
         }
     }
 
-    #[cfg(not(feature = "wolfssl430"))]
+    #[cfg(feature = "num-tickets")]
     pub fn set_num_tickets(&mut self, n: u64) -> Result<(), ErrorStack> {
         unsafe { cvt(wolf::wolfSSL_CTX_set_num_tickets(self.as_ptr(), n)).map(|_| ()) }
     }
@@ -336,6 +335,11 @@ impl SslRef {
     fn read(&mut self, buf: &mut [u8]) -> c_int {
         let len = cmp::min(c_int::max_value() as usize, buf.len()) as c_int;
         unsafe { wolf::wolfSSL_read(self.as_ptr(), buf.as_ptr() as *mut _, len) }
+    }
+
+    fn write(&mut self, buf: &[u8]) -> c_int {
+        let len = cmp::min(c_int::max_value() as usize, buf.len()) as c_int;
+        unsafe { wolf::wolfSSL_write(self.as_ptr(), buf.as_ptr() as *const c_void, len) }
     }
 
     /// Sets the extra data at the specified index.
@@ -396,6 +400,7 @@ impl SslRef {
         registry.get_mut::<T>()
     }
 
+    #[cfg(feature = "msg-callback")]
     pub fn set_msg_callback<F>(&mut self, callback: F) -> Result<(), ErrorStack>
     where
         F: Fn(&mut SslRef, i32, u8, bool) + 'static,
@@ -429,16 +434,19 @@ impl SslRef {
         unsafe { wolf::wolfSSL_set_accept_state(self.as_ptr()) }
     }
 
+    #[cfg(feature = "use-session-ticket")]
     pub fn use_session_ticket(&mut self) {
         unsafe {
             wolf::wolfSSL_UseSessionTicket(self.as_ptr());
         }
     }
 
+    #[cfg(feature = "internal-header")]
     pub fn server_state(&self) -> u32 {
         unsafe { (*self.as_ptr()).options.serverState as u32 }
     }
 
+    #[cfg(feature = "internal-header")]
     pub fn server_state_str(&self) -> &'static str {
         let state = unsafe { (*self.as_ptr()).options.serverState };
 
@@ -497,10 +505,12 @@ impl SslRef {
         }
     }
 
+    #[cfg(feature = "internal-header")]
     pub fn get_accept_state(&self) -> u32 {
         unsafe { (*self.as_ptr()).options.acceptState as u32 }
     }
 
+    #[cfg(feature = "internal-header")]
     pub fn accept_state_str(&self, tls_version: TLSVersion) -> &'static str {
         let state = unsafe { (*self.as_ptr()).options.acceptState };
 
@@ -567,6 +577,7 @@ impl SslRef {
 pub struct SslStream<S> {
     ssl: ManuallyDrop<Ssl>,
     method: ManuallyDrop<bio::BioMethod>,
+    bio: *mut wolf::WOLFSSL_BIO,
     _p: PhantomData<S>,
 }
 
@@ -600,6 +611,7 @@ impl<S: Read + Write> SslStream<S> {
         Ok(SslStream {
             ssl: ManuallyDrop::new(ssl),
             method: ManuallyDrop::new(method),
+            bio,
             _p: PhantomData,
         })
     }
@@ -611,9 +623,7 @@ impl<S: Read + Write> SslStream<S> {
     /// will most likely corrupt the SSL session.
     pub fn get_mut(&mut self) -> &mut S {
         unsafe {
-            let bio = wolf::wolfSSL_SSL_get_rbio(self.ssl.as_ptr());
-
-            bio::get_mut(bio)
+            bio::get_mut(self.bio)
         }
     }
 
@@ -678,12 +688,30 @@ impl<S: Read + Write> SslStream<S> {
         }
     }
 
+    /// Like `write`, but returns an `ssl::Error` rather than an `io::Error`.
+    ///
+    /// It is particularly useful with a non-blocking socket, where the error value will identify if
+    /// OpenSSL is waiting on read or write readiness.
+    pub fn ssl_write(&mut self, buf: &[u8]) -> Result<usize, SslError> {
+        // See above for why we short-circuit on zero-length buffers
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let ret = self.ssl.write(buf);
+        if ret > 0 {
+            Ok(ret as usize)
+        } else {
+            Err(self.make_error(ret))
+        }
+    }
+
     fn get_raw_rbio(&self) -> *mut bio::BIO {
-        unsafe { wolf::wolfSSL_SSL_get_rbio(self.ssl.as_ptr()) }
+        unsafe { self.bio }
     }
 
     fn get_bio_error(&mut self) -> Option<io::Error> {
-        unsafe { bio::take_error::<S>(wolf::wolfSSL_SSL_get_rbio(self.ssl.as_ptr())) }
+        unsafe { bio::take_error::<S>(self.bio) }
     }
 
     fn check_panic(&mut self) {
@@ -730,31 +758,21 @@ impl<S: Read + Write> SslStream<S> {
     ///
     /// [`SSL_do_handshake`]: https://www.openssl.org/docs/manmaster/man3/SSL_do_handshake.html
     pub fn do_handshake(&mut self) -> Result<(), SslError> {
-        pub unsafe extern "C" fn SSL_connect_timeout_ex(_info: *mut wolf::TimeoutInfo) -> i32 {
-            0
-        }
-
-        pub unsafe extern "C" fn SSL_connect_ex(_info: *mut wolf::HandShakeInfo) -> i32 {
-            0
-        }
-
-        #[cfg(feature = "wolfssl430")]
-        type WolfTimeval = wolf::Timeval;
-
-        #[cfg(not(feature = "wolfssl430"))]
-        type WolfTimeval = wolf::WOLFSSL_TIMEVAL;
-
         let ret = unsafe {
-            //wolf::wolfSSL_SSL_do_handshake(self.ssl.as_ptr())
-            wolf::wolfSSL_accept_ex(
-                self.ssl.as_ptr(),
-                Some(SSL_connect_ex),
-                Some(SSL_connect_timeout_ex),
-                WolfTimeval {
-                    tv_sec: 5,
-                    tv_usec: 0,
-                },
-            )
+            let side = wolf::wolfSSL_GetSide(self.ssl.as_ptr());
+
+            if side < 0 {
+                return Err(self.make_error(side))
+            }
+
+            if side as c_uint == wolf::WOLFSSL_CLIENT_END {
+                wolf::wolfSSL_connect(self.ssl.as_ptr())
+            } else if side as c_uint == wolf::WOLFSSL_SERVER_END {
+                wolf::wolfSSL_accept(self.ssl.as_ptr())
+            } else {
+                // do nothing
+                1
+            }
         };
         if ret > 0 {
             Ok(())
@@ -765,5 +783,45 @@ impl<S: Read + Write> SslStream<S> {
 
     pub fn clear(&mut self) -> u32 {
         unsafe { wolf::wolfSSL_clear(self.ssl.as_ptr()) as u32 }
+    }
+}
+
+impl<S: Read + Write> Read for SslStream<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            match self.ssl_read(buf) {
+                Ok(n) => return Ok(n),
+                Err(ref e) if e.code() == ErrorCode::ZERO_RETURN => return Ok(0),
+                Err(ref e) if e.code() == ErrorCode::SYSCALL && e.io_error().is_none() => {
+                    return Ok(0);
+                }
+                Err(ref e) if e.code() == ErrorCode::WANT_READ && e.io_error().is_none() => {}
+                Err(e) => {
+                    return Err(e
+                        .into_io_error()
+                        .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e)));
+                }
+            }
+        }
+    }
+}
+
+impl<S: Read + Write> Write for SslStream<S> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        loop {
+            match self.ssl_write(buf) {
+                Ok(n) => return Ok(n),
+                Err(ref e) if e.code() == ErrorCode::WANT_READ && e.io_error().is_none() => {}
+                Err(e) => {
+                    return Err(e
+                        .into_io_error()
+                        .unwrap_or_else(|e| io::Error::new(io::ErrorKind::Other, e)));
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.get_mut().flush()
     }
 }
