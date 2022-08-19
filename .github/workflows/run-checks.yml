@@ -12,4 +12,4 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - name: Format
         shell: bash
-        run: cargo fmt
+        run: cargo fmt --all -- --check
